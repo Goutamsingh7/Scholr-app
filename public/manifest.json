@@ -1,0 +1,47 @@
+{
+  "name": "Scholr — AI Attendance Tracker",
+  "short_name": "Scholr",
+  "description": "Track college attendance with AI. Never fall below 75% again.",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#05050e",
+  "theme_color": "#7c3aed",
+  "orientation": "portrait-primary",
+  "categories": ["education", "productivity"],
+  "lang": "en-IN",
+  "icons": [
+    { "src": "/icon-72.png",  "sizes": "72x72",   "type": "image/png" },
+    { "src": "/icon-96.png",  "sizes": "96x96",   "type": "image/png" },
+    { "src": "/icon-128.png", "sizes": "128x128", "type": "image/png" },
+    { "src": "/icon-144.png", "sizes": "144x144", "type": "image/png" },
+    { "src": "/icon-152.png", "sizes": "152x152", "type": "image/png" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-384.png", "sizes": "384x384", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Home",
+      "url": "/dashboard",
+      "icons": [{ "src": "/icon-96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Today's Schedule",
+      "short_name": "Schedule",
+      "url": "/dashboard/schedule",
+      "icons": [{ "src": "/icon-96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Analytics",
+      "short_name": "Stats",
+      "url": "/dashboard/analytics",
+      "icons": [{ "src": "/icon-96.png", "sizes": "96x96" }]
+    }
+  ],
+  "screenshots": [
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "form_factor": "narrow" }
+  ]
+}

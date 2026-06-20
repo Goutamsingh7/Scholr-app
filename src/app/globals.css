@@ -130,3 +130,34 @@ input:focus, textarea:focus {
   border-color: rgba(124,58,237,0.5) !important;
   box-shadow: 0 0 0 3px rgba(124,58,237,0.12);
 }
+
+/* ─── PWA / Mobile Improvements ───────────────────────────────────────────── */
+
+/* Safe area for notch / home indicator */
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Better tap highlight */
+* { -webkit-tap-highlight-color: rgba(124, 58, 237, 0.15); }
+
+/* Prevent text selection on UI elements */
+button, a, nav { -webkit-user-select: none; user-select: none; }
+
+/* Smooth momentum scrolling on iOS */
+.overflow-y-auto, .overflow-auto { -webkit-overflow-scrolling: touch; }
+
+/* Prevent double-tap zoom */
+button, a { touch-action: manipulation; }
+
+/* Status bar padding when in standalone/PWA mode */
+@media all and (display-mode: standalone) {
+  body { padding-top: max(env(safe-area-inset-top), 20px); }
+  header { padding-top: env(safe-area-inset-top); }
+}
+
+/* Bottom navigation safe area */
+.pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 16px); }
