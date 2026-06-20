@@ -247,7 +247,7 @@ export default function LandingPage() {
             <Link href="/refund" className="hover:text-white/50 transition-colors">Refund Policy</Link>
             <Link href="/contact" className="hover:text-white/50 transition-colors">Contact</Link>
           </div>
-          <p className="text-white/15 text-xs">© 2026 Scholr · Built with Claude AI</p>
+          <p className="text-white/15 text-xs">© 2026 Scholr · Built by InvictusG</p>
         </div>
       </footer>
     </div>
