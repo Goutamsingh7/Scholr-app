@@ -1,285 +1,203 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import toast from 'react-hot-toast';
-import SessionModal from '@/components/dashboard/session-modal';
-import { ClassSession } from '@/types';
+import{useState,useEffect,useCallback}from'react';
+import{motion,AnimatePresence}from'framer-motion';
+import toast from'react-hot-toast';
+import SessionModal from'@/components/dashboard/session-modal';
+import ClassManagerModal from'@/components/dashboard/class-manager-modal';
+import{ClassSession}from'@/types';
 
-const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+const DAY_NAMES=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MONTH_NAMES=['January','February','March','April','May','June','July','August','September','October','November','December'];
 
-function getWeekBounds(offset: number) {
-  const now = new Date();
-  const day = now.getDay(); // 0=Sun
-  const diffToMon = day === 0 ? -6 : 1 - day;
-  const mon = new Date(now);
-  mon.setDate(now.getDate() + diffToMon + offset * 7);
-  mon.setHours(0,0,0,0);
-  const sun = new Date(mon);
-  sun.setDate(mon.getDate() + 6);
-  sun.setHours(23,59,59,999);
-  return { start: mon, end: sun };
+function getWeekDates(offset:number):Date[]{
+  const d=new Date();d.setHours(0,0,0,0);
+  d.setDate(d.getDate()-d.getDay()+offset*7);
+  return Array.from({length:7},(_,i)=>{const x=new Date(d);x.setDate(d.getDate()+i);return x;});
+}
+function sameDay(a:Date,b:Date){return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();}
+function toDateStr(d:Date){return d.toISOString().split('T')[0];}
+function getSubjectColor(s:string){const h=s.split('').reduce((a,b)=>a+b.charCodeAt(0),0);return['bg-violet-500','bg-cyan-500','bg-pink-500','bg-emerald-500','bg-amber-500','bg-blue-500','bg-rose-500','bg-teal-500'][h%8];}
+
+function MiniRing({pct}:{pct:number}){
+  const r=18,circ=2*Math.PI*r,dash=(pct/100)*circ;
+  const color=pct>=75?'#4ade80':pct>=50?'#fbbf24':'#f87171';
+  return(
+    <div className="relative w-12 h-12 flex items-center justify-center shrink-0">
+      <svg className="absolute inset-0 -rotate-90" viewBox="0 0 44 44">
+        <circle cx={22} cy={22} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={4}/>
+        <circle cx={22} cy={22} r={r} fill="none" stroke={color} strokeWidth={4} strokeLinecap="round" strokeDasharray={`${dash} ${circ}`} style={{filter:`drop-shadow(0 0 4px ${color}88)`}}/>
+      </svg>
+      <span className="text-[10px] font-bold text-white relative z-10">{pct}%</span>
+    </div>
+  );
 }
 
-function getSubjectColor(subject: string) {
-  const hash = subject.split('').reduce((a,b) => a + b.charCodeAt(0), 0);
-  const palettes = [
-    { bg:'bg-violet-500/10', border:'border-violet-500/20', text:'text-violet-300', dot:'bg-violet-400' },
-    { bg:'bg-cyan-500/10', border:'border-cyan-500/20', text:'text-cyan-300', dot:'bg-cyan-400' },
-    { bg:'bg-pink-500/10', border:'border-pink-500/20', text:'text-pink-300', dot:'bg-pink-400' },
-    { bg:'bg-emerald-500/10', border:'border-emerald-500/20', text:'text-emerald-300', dot:'bg-emerald-400' },
-    { bg:'bg-amber-500/10', border:'border-amber-500/20', text:'text-amber-300', dot:'bg-amber-400' },
-    { bg:'bg-blue-500/10', border:'border-blue-500/20', text:'text-blue-300', dot:'bg-blue-400' },
-    { bg:'bg-rose-500/10', border:'border-rose-500/20', text:'text-rose-300', dot:'bg-rose-400' },
-    { bg:'bg-teal-500/10', border:'border-teal-500/20', text:'text-teal-300', dot:'bg-teal-400' },
-  ];
-  return palettes[hash % palettes.length];
-}
+export default function SchedulePage(){
+  const[weekOffset,setWeekOffset]=useState(0);
+  const[selectedDate,setSelectedDate]=useState(()=>{const d=new Date();d.setHours(0,0,0,0);return d;});
+  const[allSessions,setAllSessions]=useState<ClassSession[]>([]);
+  const[subjectStats,setSubjectStats]=useState<Record<string,{pct:number;canMiss:number}>>({});
+  const[loading,setLoading]=useState(true);
+  const[sessionModal,setSessionModal]=useState<ClassSession|null>(null);
+  const[classManager,setClassManager]=useState<{open:boolean;editing:ClassSession|null}>({open:false,editing:null});
+  const[markingId,setMarkingId]=useState<string|null>(null);
 
-export default function SchedulePage() {
-  const [weekOffset, setWeekOffset] = useState(0);
-  const [sessions, setSessions] = useState<ClassSession[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedSession, setSelectedSession] = useState<ClassSession | null>(null);
-  const [viewMode, setViewMode] = useState<'week' | 'list'>('week');
-  const [markingId, setMarkingId] = useState<string | null>(null);
+  const weekDates=getWeekDates(weekOffset);
 
-  const { start, end } = getWeekBounds(weekOffset);
-
-  const fetchSessions = useCallback(async () => {
+  const fetchData=useCallback(async()=>{
     setLoading(true);
-    try {
-      const s = start.toISOString();
-      const e = end.toISOString();
-      const res = await fetch(`/api/sessions?weekStart=${s}&weekEnd=${e}`);
-      const data = await res.json();
-      setSessions(data.sessions ?? []);
-    } catch {
-      toast.error('Failed to load sessions');
-    } finally {
-      setLoading(false);
-    }
-  }, [weekOffset]);
+    try{
+      const start=weekDates[0].toISOString(),end=weekDates[6].toISOString();
+      const[sessRes,attRes]=await Promise.all([fetch(`/api/sessions?weekStart=${start}&weekEnd=${end}`),fetch('/api/attendance')]);
+      const sessData=await sessRes.json(),attData=await attRes.json();
+      setAllSessions(sessData.sessions??[]);
+      const stats:Record<string,{pct:number;canMiss:number}>={};
+      for(const sub of(attData.subjectStats??[])){stats[sub.subject]={pct:sub.percentage,canMiss:sub.canMiss};}
+      setSubjectStats(stats);
+    }catch{toast.error('Failed to load');}finally{setLoading(false);}
+  },[weekOffset]);
 
-  useEffect(() => { fetchSessions(); }, [fetchSessions]);
+  useEffect(()=>{fetchData();},[fetchData]);
 
-  async function quickMark(sessionId: string, status: string, e: React.MouseEvent) {
-    e.stopPropagation();
-    setMarkingId(sessionId);
-    try {
-      await fetch('/api/attendance', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ classSessionId:sessionId, status }),
-      });
-      setSessions(s => s.map(sess =>
-        sess.id === sessionId ? { ...sess, attendance:{ id:'',classSessionId:sessionId,status:status as any,markedAt:new Date().toISOString() } } : sess
-      ));
-      toast.success(`Marked ${status}`);
-    } catch {
-      toast.error('Failed to mark');
-    } finally {
-      setMarkingId(null);
-    }
+  const today=new Date();today.setHours(0,0,0,0);
+  const daySelected=new Date(selectedDate);daySelected.setHours(0,0,0,0);
+  const daySessions=allSessions.filter(s=>{const sd=new Date(s.date);sd.setHours(0,0,0,0);return sd.getTime()===daySelected.getTime();}).sort((a,b)=>a.startTime.localeCompare(b.startTime));
+
+  async function quickMark(sessId:string,status:string,e:React.MouseEvent){
+    e.stopPropagation();setMarkingId(sessId);
+    try{
+      await fetch('/api/attendance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({classSessionId:sessId,status})});
+      setAllSessions(s=>s.map(x=>x.id===sessId?{...x,attendance:{id:'',classSessionId:sessId,status:status as any,markedAt:''}}:x));
+    }catch{toast.error('Failed');}finally{setMarkingId(null);}
   }
 
-  function handleAttendanceChange(sessionId: string, status: string) {
-    setSessions(s => s.map(sess =>
-      sess.id === sessionId ? { ...sess, attendance:{ id:'',classSessionId:sessionId,status:status as any,markedAt:new Date().toISOString() } } : sess
-    ));
+  async function shareSchedule(){
+    const lines=daySessions.map(s=>`${s.startTime}–${s.endTime}  ${s.subject}  [${s.attendance?.status??'unmarked'}]`);
+    const text=`📅 My Schedule — ${selectedDate.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'})}\n\n${lines.join('\n')||'No classes today'}\n\nTracked with Scholr`;
+    if(navigator.share){try{await navigator.share({title:'My Schedule — Scholr',text});return;}catch{}}
+    await navigator.clipboard.writeText(text);toast.success('Schedule copied to clipboard');
   }
 
-  // Group by day
-  const dayGroups = DAYS.map((dayName, i) => {
-    const dayDate = new Date(start);
-    dayDate.setDate(start.getDate() + i);
-    const daySessions = sessions.filter(s => {
-      const sd = new Date(s.date); sd.setHours(0,0,0,0);
-      const dd = new Date(dayDate); dd.setHours(0,0,0,0);
-      return sd.getTime() === dd.getTime();
-    }).sort((a,b) => a.startTime.localeCompare(b.startTime));
-    return { dayName, date: dayDate, sessions: daySessions };
-  }).filter(d => d.date <= end);
+  function onClassSaved(saved:ClassSession){
+    setAllSessions(prev=>{const exists=prev.find(s=>s.id===saved.id);return exists?prev.map(s=>s.id===saved.id?saved:s):[...prev,saved];});
+    fetchData();
+  }
+  function onClassDeleted(id:string){setAllSessions(prev=>prev.filter(s=>s.id!==id));}
+  function handleAttendanceChange(sessionId:string,status:string){setAllSessions(s=>s.map(x=>x.id===sessionId?{...x,attendance:{id:'',classSessionId:sessionId,status:status as any,markedAt:''}}:x));fetchData();}
 
-  const today = new Date(); today.setHours(0,0,0,0);
-  const isCurrentWeek = weekOffset === 0;
+  const monthYear=`${MONTH_NAMES[weekDates[0].getMonth()]} ${weekDates[0].getFullYear()}`;
 
-  const weekLabel = `${start.toLocaleDateString('en-IN',{day:'numeric',month:'short'})} – ${end.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}`;
-
-  const SessionCard = ({ sess, compact = false }: { sess: ClassSession; compact?: boolean }) => {
-    const sc = getSubjectColor(sess.subject);
-    const status = sess.attendance?.status;
-    return (
-      <div onClick={() => setSelectedSession(sess)}
-        className={`${sc.bg} border ${sc.border} rounded-xl cursor-pointer transition-all duration-200 hover:scale-[1.02] hover:border-white/20 group
-          ${compact ? 'p-2' : 'p-3'}`}
-      >
-        <p className={`font-medium text-white text-xs leading-tight truncate ${compact?'text-[11px]':''}`}>{sess.subject}</p>
-        <p className={`font-mono mt-0.5 text-white/40 ${compact?'text-[10px]':'text-xs'}`}>{sess.startTime}</p>
-        {status && (
-          <span className={`text-[10px] px-1.5 py-0.5 rounded-full badge-${status} mt-1 inline-block`}>
-            {status[0].toUpperCase()}
-          </span>
-        )}
-        {!status && !compact && (
-          <div className="flex gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e=>e.stopPropagation()}>
-            {(['present','absent','holiday'] as const).map(s => (
-              <button key={s} onClick={e=>quickMark(sess.id,s,e)} disabled={!!markingId}
-                className={`text-[10px] px-1.5 py-0.5 rounded font-bold transition-all badge-${s} hover:scale-110`}
-                title={s}
-              >{s[0].toUpperCase()}</button>
-            ))}
+  return(
+    <div className="flex flex-col min-h-screen">
+      {/* Sticky header */}
+      <div className="sticky top-[60px] lg:top-0 z-30 px-4 pt-4 pb-3" style={{background:'rgba(5,5,14,0.92)',backdropFilter:'blur(20px)'}}>
+        {/* Month + nav */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <button onClick={()=>setWeekOffset(w=>w-1)} className="w-8 h-8 glass rounded-xl flex items-center justify-center text-white/60 hover:text-white transition-all text-lg">‹</button>
+            <h2 className="font-playfair font-bold text-white text-lg">{monthYear}</h2>
+            <button onClick={()=>setWeekOffset(w=>w+1)} className="w-8 h-8 glass rounded-xl flex items-center justify-center text-white/60 hover:text-white transition-all text-lg">›</button>
           </div>
-        )}
+          <div className="flex items-center gap-2">
+            {weekOffset!==0&&<button onClick={()=>{setWeekOffset(0);setSelectedDate(new Date());}} className="text-xs px-3 py-1.5 glass rounded-xl text-violet-400 border border-violet-500/30">Today</button>}
+            <button onClick={shareSchedule} className="w-8 h-8 glass rounded-xl flex items-center justify-center text-white/50 hover:text-white transition-all" title="Share day schedule">⬆</button>
+          </div>
+        </div>
+        {/* Week day selector */}
+        <div className="grid grid-cols-7 gap-1">
+          {weekDates.map((date,i)=>{
+            const isToday=sameDay(date,today),isSel=sameDay(date,selectedDate);
+            const hasSess=allSessions.some(s=>{const sd=new Date(s.date);sd.setHours(0,0,0,0);return sd.getTime()===date.getTime();});
+            return(
+              <button key={i} onClick={()=>setSelectedDate(new Date(date))} className="flex flex-col items-center gap-1 py-1.5 rounded-xl transition-all" style={isSel?{background:'rgba(124,58,237,0.25)',border:'1px solid rgba(124,58,237,0.4)'}:{}}>
+                <span className={`text-[10px] font-medium ${isSel?'text-violet-300':isToday?'text-violet-400':'text-white/35'}`}>{DAY_NAMES[date.getDay()]}</span>
+                <span className={`text-base font-bold w-8 h-8 flex items-center justify-center rounded-full transition-all ${isToday&&!isSel?'text-violet-400 ring-1 ring-violet-500/50':isSel?'text-white bg-violet-600 shadow-[0_0_12px_rgba(124,58,237,0.5)]':'text-white/70'}`}>{date.getDate()}</span>
+                <div className={`w-1 h-1 rounded-full ${hasSess?(isSel?'bg-violet-300':'bg-white/30'):'bg-transparent'}`}/>
+              </button>
+            );
+          })}
+        </div>
       </div>
-    );
-  };
 
-  return (
-    <div className="p-4 lg:p-8 space-y-6">
-      {/* Header */}
-      <motion.div initial={{ opacity:0,y:20 }} animate={{ opacity:1,y:0 }} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="font-playfair text-2xl font-bold text-white">Schedule</h1>
-          <p className="text-white/40 text-sm mt-0.5">{weekLabel}</p>
-        </div>
-        <div className="flex items-center gap-3">
-          {/* View toggle */}
-          <div className="glass rounded-xl p-1 flex gap-1">
-            {(['week','list'] as const).map(mode => (
-              <button key={mode} onClick={() => setViewMode(mode)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${viewMode===mode?'bg-violet-600/80 text-white':'text-white/40 hover:text-white'}`}
-              >{mode === 'week' ? '⊞ Week' : '☰ List'}</button>
-            ))}
+      {/* Day content */}
+      <div className="flex-1 px-4 pb-24 lg:pb-8 pt-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-white">{sameDay(selectedDate,today)?'Today':selectedDate.toLocaleDateString('en-IN',{weekday:'long'})}</h3>
+            <p className="text-xs text-white/35">{selectedDate.toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})}</p>
           </div>
-          {/* Week nav */}
-          <div className="flex items-center glass rounded-xl overflow-hidden">
-            <button onClick={() => setWeekOffset(w => w-1)} className="px-3 py-2 text-white/60 hover:text-white hover:bg-white/5 transition-all text-sm">‹</button>
-            <button onClick={() => setWeekOffset(0)} className={`px-3 py-2 text-xs font-medium transition-all ${isCurrentWeek?'text-violet-400':'text-white/40 hover:text-white hover:bg-white/5'}`}>
-              {isCurrentWeek ? 'This week' : 'Today'}
-            </button>
-            <button onClick={() => setWeekOffset(w => w+1)} className="px-3 py-2 text-white/60 hover:text-white hover:bg-white/5 transition-all text-sm">›</button>
-          </div>
+          <button onClick={()=>setClassManager({open:true,editing:null})} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600/80 hover:bg-violet-500 text-white text-sm font-medium transition-all btn-glow">+ Add class</button>
         </div>
-      </motion.div>
 
-      {loading ? (
-        <div className="space-y-3 animate-pulse">
-          {[...Array(5)].map((_,i) => <div key={i} className="h-20 glass rounded-2xl shimmer" />)}
-        </div>
-      ) : (
         <AnimatePresence mode="wait">
-          <motion.div key={`${weekOffset}-${viewMode}`} initial={{ opacity:0,x:16 }} animate={{ opacity:1,x:0 }} exit={{ opacity:0,x:-16 }}
-            transition={{ duration:0.3 }}
-          >
-            {/* ── Week Grid View ──────────────────────────────────────── */}
-            {viewMode === 'week' && (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                {dayGroups.slice(0, 6).map(({ dayName, date, sessions: daySess }) => {
-                  const isToday = date.getTime() === today.getTime();
-                  const isPast = date < today;
-                  return (
-                    <div key={dayName} className={`glass rounded-2xl overflow-hidden ${isToday?'border border-violet-500/30':''}`}
-                      style={isToday ? { boxShadow:'0 0 20px rgba(124,58,237,0.15)' } : {}}
-                    >
-                      <div className={`px-3 py-3 border-b border-white/5 ${isToday?'bg-violet-600/10':''}`}>
-                        <p className={`text-xs font-semibold uppercase tracking-wider ${isToday?'text-violet-300':isPast?'text-white/25':'text-white/50'}`}>
-                          {dayName.slice(0,3)}
-                        </p>
-                        <p className={`text-lg font-playfair font-bold ${isToday?'gradient-text-static':isPast?'text-white/25':'text-white'}`}>
-                          {date.getDate()}
-                        </p>
-                        {isToday && <p className="text-[10px] text-violet-400 font-medium">Today</p>}
+          <motion.div key={toDateStr(selectedDate)} initial={{opacity:0,x:12}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-12}}>
+            {loading?(
+              <div className="space-y-3 animate-pulse">{[1,2,3].map(i=><div key={i} className="h-24 glass rounded-2xl shimmer"/>)}</div>
+            ):daySessions.length===0?(
+              <div className="glass-card rounded-2xl p-8 text-center"><p className="text-4xl mb-3">🎉</p><p className="text-white/50 text-sm font-medium">No classes scheduled</p><p className="text-white/25 text-xs mt-1">Tap "+ Add class" to add one</p></div>
+            ):(
+              <div className="space-y-3">
+                {daySessions.map(sess=>{
+                  const status=sess.attendance?.status,dot=getSubjectColor(sess.subject),subStat=subjectStats[sess.subject],pct=subStat?.pct??0,canMiss=subStat?.canMiss??0;
+                  return(
+                    <motion.div key={sess.id} layout className="glass-card rounded-2xl overflow-hidden">
+                      <div className="flex items-center gap-3 px-4 py-3.5 cursor-pointer" onClick={()=>setSessionModal(sess)}>
+                        <div className="text-xs text-white/40 font-mono text-center w-12 shrink-0 leading-relaxed"><div>{sess.startTime}</div><div>{sess.endTime}</div></div>
+                        <div className={`w-8 h-8 rounded-xl ${dot} bg-opacity-80 flex items-center justify-center shrink-0 text-white text-sm font-bold`}>{sess.subject[0]?.toUpperCase()}</div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-white capitalize truncate">{sess.subject}</p>
+                          <p className="text-xs text-white/40 mt-0.5">
+                            {status?<span className={`badge-${status} px-1.5 py-0.5 rounded-full text-[10px] font-medium`}>{status}</span>:<span className="text-white/25">Not marked</span>}
+                            {canMiss>0&&!status&&<span className="text-emerald-400/70 ml-1.5">· Can miss {canMiss} more</span>}
+                          </p>
+                        </div>
+                        <MiniRing pct={pct}/>
+                        <button onClick={e=>{e.stopPropagation();setClassManager({open:true,editing:sess});}} className="w-7 h-7 glass rounded-lg flex items-center justify-center text-white/30 hover:text-white transition-colors text-xs shrink-0">✎</button>
                       </div>
-                      <div className="p-2 space-y-1.5 min-h-[120px]">
-                        {daySess.length === 0 ? (
-                          <p className="text-[11px] text-white/15 text-center py-4">—</p>
-                        ) : (
-                          daySess.map(sess => <SessionCard key={sess.id} sess={sess} compact />)
-                        )}
+                      {/* P/A/Cancel buttons */}
+                      <div className="grid grid-cols-3 border-t border-white/5">
+                        {([['◎ Can','holiday'],['✗ Abs','absent'],['✓ Pre','present']] as const).map(([label,s])=>(
+                          <button key={s} onClick={e=>quickMark(sess.id,s,e)} disabled={markingId===sess.id}
+                            className={`py-2.5 text-xs font-semibold transition-all ${status===s?s==='present'?'bg-emerald-500/20 text-emerald-300':s==='absent'?'bg-red-500/20 text-red-300':'bg-amber-500/20 text-amber-300':'text-white/35 hover:text-white hover:bg-white/5'} ${markingId===sess.id?'opacity-50 cursor-not-allowed':''}`}
+                          >{markingId===sess.id?'…':label}</button>
+                        ))}
                       </div>
-                    </div>
+                    </motion.div>
                   );
                 })}
               </div>
             )}
 
-            {/* ── List View ───────────────────────────────────────────── */}
-            {viewMode === 'list' && (
-              <div className="space-y-6">
-                {dayGroups.map(({ dayName, date, sessions: daySess }) => {
-                  if (daySess.length === 0) return null;
-                  const isToday = date.getTime() === today.getTime();
-                  return (
-                    <div key={dayName}>
-                      <div className="flex items-center gap-3 mb-3">
-                        <div className={`flex items-center gap-2 ${isToday?'text-violet-300':'text-white/40'}`}>
-                          <span className="text-sm font-semibold">{dayName}</span>
-                          <span className="text-xs opacity-60">{date.toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</span>
-                          {isToday && <span className="text-xs bg-violet-600/30 text-violet-300 px-2 py-0.5 rounded-full border border-violet-500/30">Today</span>}
+            {/* Week summary */}
+            {!loading&&(
+              <div className="glass-card rounded-2xl p-4 mt-4">
+                <p className="text-xs text-white/40 uppercase tracking-wider mb-3 font-semibold">This week</p>
+                <div className="grid grid-cols-7 gap-1.5">
+                  {weekDates.map((date,i)=>{
+                    const ds=allSessions.filter(s=>{const sd=new Date(s.date);sd.setHours(0,0,0,0);return sd.getTime()===date.getTime();});
+                    const pre=ds.filter(s=>s.attendance?.status==='present').length,abs=ds.filter(s=>s.attendance?.status==='absent').length;
+                    return(
+                      <button key={i} onClick={()=>setSelectedDate(new Date(date))} className="flex flex-col items-center gap-1">
+                        <span className={`text-[10px] ${sameDay(date,selectedDate)?'text-violet-300':'text-white/30'}`}>{DAY_NAMES[date.getDay()]}</span>
+                        <div className="w-full h-6 glass rounded-lg flex items-center justify-center gap-0.5">
+                          {ds.length===0?<span className="text-[9px] text-white/15">—</span>:<>
+                            {pre>0&&<span className="text-[9px] text-emerald-400 font-bold">{pre}P</span>}
+                            {abs>0&&<span className="text-[9px] text-red-400 font-bold">{abs}A</span>}
+                            {ds.length-pre-abs>0&&<span className="text-[9px] text-white/30">{ds.length-pre-abs}?</span>}
+                          </>}
                         </div>
-                        <div className="flex-1 h-px bg-white/5" />
-                        <span className="text-xs text-white/25">{daySess.length} {daySess.length===1?'class':'classes'}</span>
-                      </div>
-                      <div className="space-y-2">
-                        {daySess.map(sess => {
-                          const sc = getSubjectColor(sess.subject);
-                          const status = sess.attendance?.status;
-                          return (
-                            <div key={sess.id} onClick={() => setSelectedSession(sess)}
-                              className="glass-card rounded-xl px-5 py-4 flex items-center gap-4 cursor-pointer group"
-                            >
-                              <div className={`w-1.5 h-10 rounded-full ${sc.dot} shrink-0 opacity-70`} />
-                              <div className="flex-1 min-w-0">
-                                <p className="font-medium text-white group-hover:text-violet-200 transition-colors truncate">{sess.subject}</p>
-                                <p className="text-xs text-white/40 font-mono mt-0.5">{sess.startTime} – {sess.endTime}</p>
-                              </div>
-                              <div className="flex items-center gap-2 shrink-0">
-                                {status ? (
-                                  <span className={`text-xs px-3 py-1 rounded-full font-medium badge-${status}`}>{status}</span>
-                                ) : (
-                                  <div className="flex gap-1">
-                                    {(['present','absent','holiday'] as const).map(s => (
-                                      <button key={s} onClick={e=>quickMark(sess.id,s,e)} disabled={!!markingId}
-                                        className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all hover:scale-105 badge-${s} hover:brightness-125 disabled:opacity-40`}
-                                      >{s==='present'?'P':s==='absent'?'A':'H'}</button>
-                                    ))}
-                                  </div>
-                                )}
-                                <span className="text-white/20 group-hover:text-white/50 transition-colors ml-1">›</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-                {sessions.length === 0 && (
-                  <div className="text-center py-16 text-white/25">
-                    <p className="text-4xl mb-3">🗓</p>
-                    <p>No classes scheduled for this week</p>
-                  </div>
-                )}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </motion.div>
         </AnimatePresence>
-      )}
+      </div>
 
-      {/* Summary bar */}
-      {!loading && sessions.length > 0 && (
-        <div className="glass rounded-xl px-5 py-3 flex flex-wrap gap-4 text-xs text-white/40">
-          {(['present','absent','holiday','unmarked'] as const).map(s => {
-            const count = s === 'unmarked'
-              ? sessions.filter(x => !x.attendance).length
-              : sessions.filter(x => x.attendance?.status === s).length;
-            return count > 0 ? (
-              <span key={s} className={`badge-${s} px-2.5 py-1 rounded-full`}>{count} {s}</span>
-            ) : null;
-          })}
-        </div>
-      )}
-
-      <SessionModal session={selectedSession} onClose={() => setSelectedSession(null)} onAttendanceChange={handleAttendanceChange} />
+      <SessionModal session={sessionModal} onClose={()=>setSessionModal(null)} onAttendanceChange={handleAttendanceChange}/>
+      <ClassManagerModal open={classManager.open} onClose={()=>setClassManager({open:false,editing:null})} onSaved={onClassSaved} onDeleted={onClassDeleted} editingSession={classManager.editing} defaultDate={toDateStr(selectedDate)}/>
     </div>
   );
 }

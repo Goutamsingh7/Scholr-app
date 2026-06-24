@@ -1,128 +1,17 @@
-const CACHE_VERSION = 'scholr-v1.1';
-const STATIC_CACHE = `${CACHE_VERSION}-static`;
-const DYNAMIC_CACHE = `${CACHE_VERSION}-dynamic`;
-
-// Pages to cache for offline
-const PRECACHE_URLS = [
-  '/',
-  '/offline',
-  '/icon-192.png',
-  '/icon-512.png',
-  '/manifest.json',
-];
-
-// Install — cache static assets
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(STATIC_CACHE)
-      .then(cache => cache.addAll(PRECACHE_URLS))
-      .then(() => self.skipWaiting())
-      .catch(() => self.skipWaiting())
-  );
-});
-
-// Activate — clean up old caches
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(
-        keys
-          .filter(k => k.startsWith('scholr-') && k !== STATIC_CACHE && k !== DYNAMIC_CACHE)
-          .map(k => caches.delete(k))
-      )
-    ).then(() => self.clients.claim())
-  );
-});
-
-// Fetch — network first, fall back to cache
-self.addEventListener('fetch', (event) => {
-  const { request } = event;
-  const url = new URL(request.url);
-
-  // Skip non-GET and API calls (always need fresh data)
-  if (request.method !== 'GET') return;
-  if (url.pathname.startsWith('/api/')) return;
-  if (url.pathname.startsWith('/_next/webpack')) return;
-
-  // For navigation requests — network first, cache fallback, offline page fallback
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request)
-        .then(response => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(DYNAMIC_CACHE).then(c => c.put(request, clone));
-          }
-          return response;
-        })
-        .catch(async () => {
-          const cached = await caches.match(request);
-          return cached || caches.match('/offline');
-        })
-    );
-    return;
+const CACHE_VER='scholr-v2',ASSET_CACHE=`${CACHE_VER}-assets`,PRECACHE=['/icon-192.png','/icon-512.png','/manifest.json'];
+self.addEventListener('install',e=>{e.waitUntil(caches.open(ASSET_CACHE).then(c=>c.addAll(PRECACHE).catch(()=>{})));self.skipWaiting();});
+self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==ASSET_CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
+self.addEventListener('fetch',event=>{
+  const{request}=event,url=new URL(request.url);
+  if(request.method!=='GET')return;
+  if(url.pathname.startsWith('/api/'))return;
+  // NEVER cache HTML — this is what causes nav to break
+  if(request.headers.get('accept')?.includes('text/html')){
+    event.respondWith(fetch(request,{cache:'no-store'}).catch(()=>caches.match('/offline')||new Response('Offline',{status:503})));return;
   }
-
-  // For static assets — cache first, network fallback
-  if (url.pathname.startsWith('/_next/static/') || url.pathname.startsWith('/icon-')) {
-    event.respondWith(
-      caches.match(request).then(cached => {
-        if (cached) return cached;
-        return fetch(request).then(response => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(STATIC_CACHE).then(c => c.put(request, clone));
-          }
-          return response;
-        });
-      })
-    );
-    return;
+  if(url.pathname.startsWith('/_next/static/')||url.pathname.match(/\.(png|jpg|ico|woff2?)$/)){
+    event.respondWith(caches.match(request).then(c=>c||fetch(request).then(r=>{if(r.ok){const cl=r.clone();caches.open(ASSET_CACHE).then(ch=>ch.put(request,cl));}return r;})));return;
   }
-
-  // Default — network with dynamic cache
-  event.respondWith(
-    fetch(request)
-      .then(response => {
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(DYNAMIC_CACHE).then(c => c.put(request, clone));
-        }
-        return response;
-      })
-      .catch(() => caches.match(request))
-  );
 });
-
-// Push notifications
-self.addEventListener('push', (event) => {
-  if (!event.data) return;
-  const data = event.data.json();
-  event.waitUntil(
-    self.registration.showNotification(data.title || 'Scholr', {
-      body: data.body || 'You have a class coming up!',
-      icon: '/icon-192.png',
-      badge: '/icon-72.png',
-      tag: data.tag || 'scholr',
-      data: data.url ? { url: data.url } : {},
-      actions: data.actions || [],
-    })
-  );
-});
-
-// Notification click — open app
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-  const url = event.notification.data?.url || '/dashboard';
-  event.waitUntil(
-    clients.matchAll({ type:'window', includeUncontrolled:true }).then(clientList => {
-      for (const client of clientList) {
-        if (client.url.includes(self.location.origin) && 'focus' in client) {
-          client.navigate(url);
-          return client.focus();
-        }
-      }
-      return clients.openWindow(url);
-    })
-  );
-});
+self.addEventListener('push',e=>{if(!e.data)return;const d=e.data.json();e.waitUntil(self.registration.showNotification(d.title||'Scholr',{body:d.body,icon:'/icon-192.png',badge:'/icon-72.png',data:d}));});
+self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.openWindow(e.notification.data?.url||'/dashboard'));});
